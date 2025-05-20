@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.jsdelivr.net/gh/netizenorg/netnet-standard-library/build/nn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/poker-hand-evaluator@latest/dist/pokerhand.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@200..900&family=Unna:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
+    <title>Poker Spiral</title>
+  </head>
+  <style>
+    * {
+      font-family: 'Unna', serif !important;
+    }
+
+    @keyframes rainbowGlow {
+      0% {
+        box-shadow: 0 0 10px hsla(0, 50%, 50%, 0.7);
+      }
+
+      /* red at 50% sat */
+      20% {
+        box-shadow: 0 0 10px hsla(30, 50%, 50%, 0.7);
+      }
+
+      /* orange */
+      40% {
+        box-shadow: 0 0 10px hsla(60, 50%, 50%, 0.7);
+      }
+
+      /* yellow */
+      60% {
+        box-shadow: 0 0 10px hsla(120, 50%, 50%, 0.7);
+      }
+
+      /* green */
+      80% {
+        box-shadow: 0 0 10px hsla(240, 50%, 50%, 0.7);
+      }
+
+      /* blue */
+      100% {
+        box-shadow: 0 0 10px hsla(280, 50%, 50%, 0.7);
+      }
+
+      /* purple */
+    }
+  </style>
+  <body>
+    <script>
+      /* global nn, Hand */
+
+      /* --- References --- */
+      /* Chat Link: https://chatgpt.com/share/682bc306-4b88-800d-b44d-04c048716865 */
+      /* Destructuring: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Destructuring */
+      /* Class Syntax: https://www.w3schools.com/js/js_classes.asp */
+      /* Poker Evaluator: https://www.npmjs.com/package/poker-hand-evaluator */
+      /* Nested Functions: https://www.geeksforgeeks.org/javascript-nested-functions/ -- this is something I do a lot in python scripts */
+
+      class Game {
+        constructor(numPlayers = 2) {
+          this.numPlayers = 2;
+          this.url = 'https://deckofcardsapi.com/api/deck/';
+          this.deck_id = null;
+          this.players = Array.from({
+            length: numPlayers
+          }, () => new Player());
+          this.community = [];
+          this.step = 0;
+          this.ui = {
+            nextBtn: null
+          };
+          this.boardContainer = null;
+          this.material = nn.create('div')
+            .css({
+              position: 'relative',
+              margin: '20px auto',
+              padding: '20px',
+              maxWidth: '60vw',
+              background: 'rgba(255,255,255,0.25)',
+              backdropFilter: 'saturate(180%) blur(10px)',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.15)',
+              animation: 'rainbowGlow 5s linear infinite',
+              borderRadius: '20px',
+            })
+            .addTo('body');
+
+          nn.create('h1')
+            .content('Poker Spiral')
+            .css({
+              textAlign: 'center',
+              fontSize: '40px',
+              margin: '0 0 20px 0',
+              fontWeight: '700'
+            })
+            .addTo(this.material);
+        }
+
+        async setup() {
+          const res = await fetch(this.url + 'new/shuffle/?deck_count=1');
+          ({
+            deck_id: this.deck_id
+          } = await res.json());
+
+          /* calculating the number of cards needed then fetching them */
+          const totalNeeded = this.numPlayers * 2 + 5;
+          const cardRes = await fetch(`${this.url}${this.deck_id}/draw/?count=${totalNeeded}`);
+          const {
+            cards
+          } = await cardRes.json();
+
+          /* dealing the cards */
+          for (let i = 0; i < this.players.length; i++) {
+            const hand = cards.slice(i * 2, i * 2 + 2);
+            this.players[i].setCards(hand);
+          }
+
+          /* setting the community cards */
+          this.community = cards.slice(this.players.length * 2);
+          this.showStartButton();
+        }
+
+        /* fairly straightforward */
+        showStartButton() {
+          const btn = nn.create('button')
+            .content('Start')
+            .css({
+              display: 'block',
+              margin: '20px auto',
+              fontSize: '20px',
+              padding: '10px 20px',
+              opacity: 0.8,
+              borderRadius: '20px',
+              border: '1px solid rgba(0,0,0,0.2)',
+              animation: 'rainbowGlow 5s linear infinite'
+            })
+            .addTo(this.material)
+            .on('click', () => {
+              btn.remove();
+              this.advance();
+            });
+        }
+
+        /* also straightforward */
+        createNextButton() {
+          if (this.ui.nextBtn) this.ui.nextBtn.remove();
+          this.ui.nextBtn = nn.create('button')
+            .content('Continue')
+            .css({
+              display: 'block',
+              margin: '20px auto',
+              fontSize: '18px',
+              padding: '8px 16px',
+              opacity: 0.8,
+              borderRadius: '20px',
+              border: '1px solid rgba(0,0,0,0.2)',
+              animation: 'rainbowGlow 5s linear infinite'
+            })
+            .addTo(this.material)
+            .on('click', () => this.advance());
+        }
+
+        /* controls the flow -- mainly used this in iOS dev */
+        advance() {
+          this.step++;
+          switch (this.step) {
+            case 1:
+              this.players.forEach((p, i) =>
+                this.renderCards(p.getCards(), i === 0 ? 'You' : 'Bot')
+              );
+              this.createNextButton();
+              break;
+            case 2:
+              this.renderBoard(this.community.slice(0, 3), 'Flop');
+              this.createNextButton();
+              break;
+            case 3:
+              this.renderBoard(this.community.slice(0, 4), 'Turn');
+              this.createNextButton();
+              break;
+            case 4:
+              this.renderBoard(this.community.slice(0, 5), 'River');
+              this.createNextButton();
+              break;
+            case 5:
+              this.showdown();
+              this.ui.nextBtn.remove();
+              break;
+          }
+        }
+
+        /* Creates the board container and renders the cards */
+        renderBoard(cards, label = '') {
+          /* removing the previous board container if it exists */
+          if (this.boardContainer) {
+            this.boardContainer.remove();
+          }
+
+          this.boardContainer = nn.create('div')
+            .css({
+              marginTop: 20,
+              textAlign: 'center'
+            })
+            .addTo(this.material)
+
+          nn.create('div')
+            .content(label)
+            .css({
+              fontWeight: 'bold',
+              fontSize: 18,
+              marginBottom: 5
+            })
+            .addTo(this.boardContainer);
+
+          cards.forEach(card => {
+            nn.create('img')
+              .set({
+                src: card.image
+              })
+              .css({
+                height: 120,
+                margin: '0 5px',
+                transition: 'transform 0.3s',
+                cursor: 'pointer'
+              })
+              .on('mouseover', function() {
+                this.css({
+                  transform: 'scale(1.1)'
+                });
+              })
+              .on('mouseout', function() {
+                this.css({
+                  transform: 'scale(1)'
+                });
+              })
+              .addTo(this.boardContainer);
+          });
+        }
+
+        /* rendering each card */
+        renderCards(cards, label = '') {
+          const container = nn.create('div')
+            .css({
+              marginTop: 20,
+              textAlign: 'center'
+            })
+            .addTo(this.material)
+          nn.create('div')
+            .content(label)
+            .css({
+              fontWeight: 'bold',
+              fontSize: 18,
+              marginBottom: 5
+            })
+            .addTo(container);
+
+          cards.forEach(card => {
+            nn.create('img')
+              .set({
+                src: card.image
+              })
+              .css({
+                height: 120,
+                margin: '0 5px',
+                transition: 'transform 0.3s',
+                cursor: 'pointer'
+              })
+              .on('mouseover', function() {
+                this.css({
+                  transform: 'scale(1.1)'
+                });
+              })
+              .on('mouseout', function() {
+                this.css({
+                  transform: 'scale(1)'
+                });
+              })
+              .addTo(container);
+          });
+        }
+
+        /* is finding the combinations of 5/7 for each poker hand */
+        /* used when determining the winner */
+        getCombinations(arr, k) {
+          const results = [];
+
+          function combinate(start, combo) {
+            if (combo.length === k) {
+              results.push(combo);
+              return;
+            }
+
+            for (let i = start; i < arr.length; i++) {
+              combinate(i + 1, combo.concat([arr[i]]));
+            }
+          }
+          combinate(0, []);
+          return results;
+        }
+
+        /* this is a MASSIVE function (most of the logic lol oops) */
+        showdown() {
+          /* normalizing community card codes (e.g. "as" → "AS") */
+          const community = this.community.map(c => c.code.trim().toUpperCase());
+          const hands = [];
+
+          /* going through each player's hole cards + community cards */
+          for (let i = 0; i < this.players.length; i++) {
+            const player = this.players[i];
+            /* getting the player’s two hole cards in the correct format */
+            const hole = player.getCards().map(c => c.code.trim().toUpperCase());
+            /* combining the hole and community into 7-card array */
+            const combined = hole.concat(community);
+
+            /* generating all 5-card subsets from 7 cards */
+            const all5Combos = this.getCombinations(combined, 5);
+
+            let best = null;
+            /* evaluating each 5-card combo to find best hand */
+            for (const combo of all5Combos) {
+              try {
+                const hand = new PokerHand(combo.join(' '));
+                /* lower score = stronger hand so get min */
+                if (!best || hand.getScore() < best.getScore()) {
+                  best = hand;
+                }
+              } catch (e) {
+                /* skip any invalid combos */
+                // Skip any invalid combinations (shouldn’t happen)
+                console.error(`Invalid combo: ${combo.join(' ')}`, e.message);
+              }
+            }
+
+            /* if there is no valid hand skip */
+            if (!best) {
+              continue
+            }
+
+            /* storing the best combo */
+            hands.push({
+              player: i + 1,
+              hand: best
+            });
+          }
+
+          /* comparing the two hands */
+          const [h1, h2] = hands;
+          const cmp = h1.hand.compareWith(h2.hand);
+
+          /* determing out which player wins (1 = first, 2 = second, else tie) */
+          const winner = cmp === 1 ? h1 : cmp === 2 ? h2 : h1;
+          const winnerPlayer = cmp === 1 ? h1.player : cmp === 2 ? h2.player : null;
+
+          /* getting the correct text */
+          const winnerText = cmp === 1 ? 'You win' : cmp === 2 ? 'Bot wins' : 'Tie';
+          const winnerRank = cmp === 1 ?
+            h1.hand.getRank() :
+            cmp === 2 ?
+            h2.hand.getRank() :
+            h1.hand.getRank();
+
+          /* display the winner and their hand rank */
+          nn.create('div')
+            .content(`Winner: ${winnerText} — ${winnerRank}`)
+            .css({
+              textAlign: 'center',
+              fontSize: '18px',
+              fontWeight: 'bold',
+              marginTop: '15px'
+            })
+            .addTo(this.material);
+
+          /* add a button to trigger the spiral reveal of winning cards */
+          const spiralBtn = nn.create('button')
+            .content('Reveal Hand')
+            .css({
+              display: 'block',
+              margin: '20px auto',
+              fontSize: '18px',
+              padding: '8px 16px',
+              opacity: 0.8,
+              borderRadius: '20px',
+              border: '1px solid rgba(0,0,0,0.2)',
+              animation: 'rainbowGlow 5s linear infinite'
+            })
+            .addTo(this.material)
+            .on('click', async () => {
+              spiralBtn.remove();
+              await this.renderSpiral(
+                winner ?
+                this.players[winnerPlayer - 1].getCards().concat(this.community) : []
+              );
+            });
+        }
+
+        /* this is the exact same logic as my other code */
+        async renderSpiral(cards) {
+          /* generating random number for number of cards */
+          const rand_num = nn.randomInt(1000, 10000);
+
+          /* generating random d -- perspective */
+          const rand_d = nn.randomFloat(0.7, 1.1);
+
+          const rad = 400,
+            num = rand_num,
+            n = 120,
+            d = rand_d,
+            s = 2 * Math.PI / num;
+
+          const cx = nn.width / 2,
+            cy = nn.height / 2;
+
+          const imageMap = await Promise.all(cards.map(c => nn.loadImage(`https://deckofcardsapi.com/static/img/${c.code}.png`)));
+
+          /* nearly identical logic to sandpiper-on-linen */
+          for (let i = 0; i < num; i++) {
+            const t = i * s;
+            const x = Math.cos(n * t) * Math.cos(t);
+            const y = Math.sin(n * t);
+            const z = Math.cos(n * t) * Math.sin(t);
+            const perspective = 1 / (z + d);
+            const x_screen = x * rad * perspective + cx;
+            const y_screen = y * rad * perspective + cy;
+            const idx = Math.floor(Math.random() * imageMap.length);
+            nn.create('img').set({
+              src: imageMap[idx].src + '#' + Math.random()
+            }).css({
+              position: 'absolute',
+              left: x_screen - 35,
+              top: y_screen - 48,
+              height: 96,
+              imageRendering: 'pixelated'
+            }).addTo('body');
+          }
+        }
+      }
+
+      /* the player class */
+      class Player {
+        constructor(name = 'Player') {
+          this.name = name;
+          this.cards = [];
+        }
+
+        /* setter method for player cards */
+        setCards(cs) {
+          this.cards = cs;
+        }
+
+        /* getter method for player cards */
+        getCards() {
+          return this.cards;
+        }
+      }
+
+      nn.on('load', async () => {
+        const game = new Game(2);
+        await game.setup();
+      });
+    </script>
+  </body>
+</html>
